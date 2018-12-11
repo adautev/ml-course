@@ -1,0 +1,260 @@
+---
+title: "R ML excercises"
+output:
+  html_document:
+    df_print: paged
+editor_options: 
+  chunk_output_type: inline
+---
+
+Load necessary data.
+
+```{r}
+check.packages <- function(pkg){
+    new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+    if (length(new.pkg)) 
+        install.packages(new.pkg, dependencies = TRUE)
+    sapply(pkg, require, character.only = TRUE)
+}
+packages<-c("ggplot2", "tidyverse", "lubridate", "caret", "dslabs", "dplyr")
+check.packages(packages)
+
+data("heights")
+data("iris")
+```
+
+Split by predictors and predicted value.
+
+```{r}
+y<-heights$sex
+x<-heights$height
+```
+
+Split tet into training and evaluation.
+
+```{r echo=TRUE}
+set.seed(2)
+test_index <- createDataPartition(y, times=1, p=0.5, list=FALSE)
+test_set <- heights[test_index, ]
+training_set <- heights[-test_index, ]
+
+```
+
+Determine y_hat for the test set just by guessing.
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+y_hat <- sample(c("Male", "Female"), size = length(test_index), replace=TRUE)
+mean(y_hat == test_set$sex)
+```
+Consider the bias, that males are higher than females.
+```{r}
+heights %>% group_by(sex) %>% summarize(mean(height), sd(height))
+```
+
+Naively predict Male and Female based on height. (;
+
+```{r}
+y_hat <- ifelse(x>62, "Male", "Female") %>% factor(levels=levels(test_set$sex))
+table(y_hat)
+print("Mean accurate answers:")
+mean(y==y_hat)
+```
+
+Check other vut off values, except for 62:
+```{r}
+cutoff <- seq(61, 70)
+accuracy <- map_dbl(cutoff, function(cutoff_value) {
+  y_hat <- ifelse(test_set$height>cutoff_value, "Male", "Female") 
+  mean(y_hat == test_set$sex)
+})
+ggplot(data=data.frame(cutoff=cutoff, accuracy=accuracy), aes(x=cutoff, y=accuracy)) + geom_line() + geom_point() + ggtitle("Accuracy distribution depending on 61:70 cutoff")
+```
+
+Check out the accuracy by sex
+```{r}
+heights %>% mutate(y_hat = y_hat) %>%
+  group_by(sex) %>%
+  summarize(accuracy = mean(y_hat == sex))
+```
+
+Notes on confusion matrixes.
+**Sensitivity**: The avility of algo to predict positive outcome, when the actual outcome is positive: P($\widehat{Y}$=1|Y=1). Also Sensitivity = TP/(TP + FN) 
+**Specificity**: The avility of algo to **not** predict positive outcome, when the actual outcome is **not** positive: P($\widehat{Y}$=0|Y=0). Also Specificity = TN/(TN + FP) 
+
+```{r}
+confusionMatrix(data=y_hat, reference=heights$sex)
+```
+
+Get F_1 harmonised score based on the cutoff:
+```{r}
+F_1 <- map_dbl(cutoff, function(cutoff_value) {
+  y_hat <- ifelse(test_set$height>cutoff_value, "Male", "Female") %>% factor(levels=levels(test_set$sex))
+  F_meas(data = y_hat, reference = factor(test_set$sex))
+})
+ggplot(data=data.frame(cutoff=cutoff, F_meas=F_1), aes(x=cutoff, y=F_meas)) + geom_line() + geom_point() + ggtitle("Accuracy distribution depending on 61:70 cutoff")
+```
+#The test set bias
+The test set has more males, so guessing 90% of the time males, would give a mean up to 72-3%:
+```{r}
+y_hat <- sample(c("Male","Female"), length(test_index), replace=TRUE, prob=c(0.9, 0.1)) %>% factor(levels = levels(test_set$sex))
+mean(y_hat==test_set$sex)
+```
+
+#Receiver Operating Characteristics - the ROC curve
+```{r}
+cutoffs <-c(50, seq(60, 75), 80)
+height_cutoff <- map_df(cutoffs, function (cutoff_value) {
+    y_hat <- ifelse(test_set$height>cutoff_value, "Male", "Female") %>% factor(levels=levels(test_set$sex))
+    list(method="Height cutoff",
+         FPR = 1-specificity(y_hat, test_set$sex),
+         TPR = sensitivity(y_hat, test_set$sex))
+})
+ggplot(data=height_cutoff, aes(x=FPR, y=TPR)) + geom_line() + geom_point() 
+```
+#Precision recall plot 
+```{r echo=TRUE}
+height_cutoff <- map_df(cutoffs, function (cutoff_value) {
+    y_hat <- ifelse(test_set$height>cutoff_value, "Male", "Female") %>% factor(levels=levels(test_set$sex))
+    list(method="Height cutoff",
+         precision = precision(y_hat, test_set$sex),
+         recall = sensitivity(y_hat, test_set$sex))
+})
+ggplot(data=height_cutoff, aes(x=recall, y=precision)) + geom_line() + geom_point() 
+probs = seq(0.1, 0.9, by = 0.1)
+guessing <- map_df(probs, function(p) {
+  y_hat <- sample(c("Male", "Female"), length(test_index), replace=TRUE, prob=c(p, 1-p)) %>% factor(levels=levels(test_set$sex))
+  list(method="Guessing",
+       precision = precision(y_hat, test_set$sex),
+       recall = sensitivity(y_hat, test_set$sex))
+})
+ggplot(data=height_cutoff, aes(x=recall, y=precision)) + geom_line() + geom_point() + geom_line(data=guessing, aes(x=recall, y=precision)) + geom_point(data=guessing, aes(x=recall, y=precision))
+```
+
+Excercises:
+The following questions all ask you to work with the dataset described below.
+
+The reported_heights and heights datasets were collected from three classes taught in the Departments of Computer Science and Biostatistics, as well as remotely through the Extension School. The Biostatistics class was taught in 2016 along with an online version offered by the Extension School. On 2016-01-25 at 8:15 AM, during one of the lectures, the instructors asked student to fill in the sex and height questionnaire that populated the reported_height dataset. The online students filled out the survey during the next few days, after the lecture was posted online. We can use this insight to define a variable which we will call type, to denote the type of student, inclass or online.
+
+The code below sets up the dataset for you to analyze in the following exercises:
+
+```{r}
+
+library(dslabs)
+library(dplyr)
+
+
+data("reported_heights")
+
+dat <- mutate(reported_heights, date_time = ymd_hms(time_stamp)) %>%
+  filter(date_time >= make_date(2016, 01, 25) & date_time < make_date(2016, 02, 1)) %>%
+  mutate(type = ifelse(day(date_time) == 25 & hour(date_time) == 8 & between(minute(date_time), 15, 30), "inclass","online")) %>%
+  select(sex, type)
+
+y <- factor(dat$sex, c("Female", "Male"))
+x <- dat$type
+dat %>% group_by(type) %>% summarize(prop_female = mean(sex == "Female"))
+
+```
+If you used the type variable to predict sex, what would the prediction accuracy be?
+```{r}
+
+  y_hat <- ifelse(dat$type == "inclass", "Male", "Female") 
+  mean(y_hat == dat$sex)
+
+```
+Write a line of code using the table function to show the confusion matrix, assuming the prediction is y_hat and the truth is y.
+
+```{r}
+ y_hat <- ifelse(dat$type == "inclass", "Female", "Male") %>% factor(levels=levels(y))
+ 
+ confusionMatrix(y_hat, y)
+```
+
+#Comprehension Check: Practice with Machine Learning
+We will practice building a machine learning algorithm using a new dataset, iris, that provides multiple predictors for us to use to train. To start, we will remove the setosa species and we will focus on the versicolor and virginica iris species using the following code:
+
+library(caret)
+data(iris)
+iris <- iris[-which(iris$Species=='setosa'),]
+y <- iris$Species
+
+The following questions all involve work with this dataset.
+First let us create an even split of the data into train and test partitions using createDataPartition. The code with a missing line is given below:
+
+```{r}
+data(iris)
+iris <- iris[-which(iris$Species=='setosa'),]
+y <- iris$Species
+
+set.seed(2)
+test_index <- createDataPartition(y,times=1,p=0.5,list=FALSE)
+# line of code
+#Which code should be used in place of # line of code above?
+#Answer:
+ 
+test <- iris[test_index,]
+train <- iris[-test_index,]
+```
+
+
+Answers are displayed within the problem Review
+Q2
+1/1 point (graded)
+Next we will figure out the singular feature in the dataset that yields the greatest overall accuracy. You can use the code from the introduction and from Q1 to start your analysis.
+
+Using only the train iris data set, which of the following is the singular feature for which a smart cutoff (simple search) yields the greatest overall accuracy?
+```{r}
+foo <- function(x){
+	rangedValues <- seq(range(x)[1],range(x)[2],by=0.1)
+	sapply(rangedValues,function(i){
+		y_hat <- ifelse(x>i,'virginica','versicolor')
+		mean(y_hat==train$Species)
+	})
+}
+predictions <- apply(train[,-5],2,foo)
+sapply(predictions,max)	
+```
+
+Using the smart cutoff value calculated on the training data, what is the overall accuracy in the test data?
+
+```{r}
+foo <- function(x){
+	rangedValues <- seq(range(x)[1],range(x)[2],by=0.1)
+	sapply(rangedValues,function(i){
+		y_hat <- ifelse(x>i,'virginica','versicolor')
+		mean(y_hat==test$Species)
+	})
+}
+predictions <- apply(test[,-5],2,foo)
+sapply(predictions,max)	
+```
+Notice that we had an overall accuracy greater than 96% in the training data, but the overall accuracy was lower in the test data. This can happen often if we overtrain. In fact, it could be the case that a single feature is not the best choice. For example, a combination of features might be optimal. Using a single feature and optimizing the cutoff as we did on our training data can lead to overfitting.
+
+Given that we know the test data, we can treat it like we did our training data to see if the same feature with a different cutoff will optimize our predictions.
+
+Which feature best optimizes our overall accuracy? - Petal.Width = 0.94
+
+Now we will perform some exploratory data analysis on the data.
+
+Notice that Petal.Length and Petal.Width in combination could potentially be more information than either feature alone.
+
+Optimize the combination of the cutoffs for Petal.Length and Petal.Width in the train data and report the overall accuracy when applied to the test dataset. For simplicity, create a rule that if either the length OR the width is greater than the length cutoff or the width cutoff then virginica or versicolor is called. (Note, the F1 will be similarly high in this example.)
+
+What is the overall accuracy for the test data now?
+
+```{r}
+petalLengthRange <- seq(range(train[,3])[1],range(train[,3])[2],by=0.1)
+petalWidthRange <- seq(range(train[,4])[1],range(train[,4])[2],by=0.1)
+cutoffs <- expand.grid(petalLengthRange,petalWidthRange)
+
+id <- sapply(seq(nrow(cutoffs)),function(i){
+	y_hat <- ifelse(train[,3]>cutoffs[i,1] | train[,4]>cutoffs[i,2],'virginica','versicolor')
+	mean(y_hat==train$Species)
+	}) %>% which.max
+
+optimalCutoff <- cutoffs[id,] %>% as.numeric
+y_hat <- ifelse(test[,3]>optimalCutoff[1] & test[,4]>optimalCutoff[2],'virginica','versicolor')
+mean(y_hat==test$Species)
+
+
+```
+
