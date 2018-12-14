@@ -16,7 +16,7 @@ check.packages <- function(pkg){
         install.packages(new.pkg, dependencies = TRUE)
     sapply(pkg, require, character.only = TRUE)
 }
-packages<-c("ggplot2", "tidyverse", "lubridate", "caret", "dslabs", "dplyr")
+packages<-c("ggplot2", "tidyverse", "lubridate", "caret", "dslabs", "dplyr", "plyr","HistData")
 check.packages(packages)
 
 data("heights")
@@ -258,3 +258,169 @@ mean(y_hat==test$Species)
 
 ```
 
+#Conditional probabilities. 
+
+For classes k = 1...K
+We have observed values x1,....,xp
+For covariates X1,.....,Xp
+
+This *does not imply* that the outcome y will take a specific value, but implies there is a specific probability.
+We denote the conditional probabilities for different classes:
+Pr(Y = k|X1=x1,...Xp=p) for k=1,....,K 
+
+To avoid expressing X1,...,Xp and x1,...xp, we denote:
+X=(X1,...,Xp)
+x=(x1,...,xp)
+
+So! The *conditional probability* of being in class K is denoted:
+p<sub>k</sub>(x) = P(Y|X=x) for k=1,.....K
+
+We will be using the notation p(x) to represent conditional probabilities as functions.
+
+The goal here is to predict the highest probability of outcome belonging to a given class, among p1(x),p2(x),....p<sub>K</sub>(x)
+
+E.g. How close the maximum probability is to 1:
+max p<sub>k</sub>(x) is to 1 *or*
+ 
+how close our estimate
+$\widehat{p}$<sub>k</sub>(x) is to p<sub>k</sub>(x)
+
+#Loss function
+For fixed samples of data, specificity, sensitivity, accuracy and F1 are used to describe algorithm properties.
+For continuous outcomes, though we define a loss function, which is denoted as $${(\widehat{Y} - Y)}^2$$
+where $\widehat{Y}$ is predictor and Y actual outcome.
+
+Since there are tests with multiple observation, the mean squared error is a mean to determine accuracy (an the actual accuracy for binary outcomes)
+$$\frac{1}{N}\sum_{i=1}^{n}{(\widehat{Y}_i - Y_i)}^2$$
+The general goal is to build an algorithm that minimises the loss and have a value close or equal to 0.
+We want the algorithm that minimizes the average of the squared loss accross many random samples.
+$$E\{\frac{1}{N}\sum_{i=1}^{n}{(\widehat{Y}_i - Y_i)}^2\}$$
+
+e.g. the expectation of squared error - *expected loss*
+
+##The main task of machine learning is to use data to estimate conditional probabilities 
+$$f(x)≡E(Y|X=X)$$
+for any set of features $${x=(x_1,...,x_p)}$$
+#Excercises
+We have a hypothetical population of 1 million individuals with the following conditional probabilities as described below:
+The test is positive 85% of the time when tested on a patient with the disease (high sensitivity): 
+
+P(test+|disease)=0.85
+The test is negative 90% of the time when tested on a healthy patient (high specificity): 
+
+P(test−|heathy)=0.90
+The disease is prevalent in about 2% of the community: 
+
+P(disease)=0.02
+Here is some sample code to get you started:
+set.seed(1)
+
+```{r}
+disease <- sample(c(0,1), size=1e6, replace=TRUE, prob=c(0.98,0.02))
+test <- rep(NA, 1e6)
+test[disease==0] <- sample(c(0,1), size=sum(disease==0), replace=TRUE, prob=c(0.90,0.10))
+test[disease==1] <- sample(c(0,1), size=sum(disease==1), replace=TRUE, prob=c(0.15, 0.85))
+
+print('#Q1: What is the probability that a test is positive?')
+mean(test==1)
+print('#Q2: What is the probability that an individual has the disease if the test is negative?')
+mean(disease[test==0])
+print('#Q3: What is the probability that you have the disease if the test is positive?')
+mean(disease[test==1]==1)
+print('#Q4: If the test is positive, what is the relative risk of having the disease?')
+mean(disease[test==1]==1)/mean(disease==1)
+```
+
+We are now going to write code to compute conditional probabilities for being male in the heights dataset. Round the heights to the closest inch. Plot the estimated conditional probability 
+P(x)=Pr(Male|height=x)
+for each x. 
+```{r}
+library(dslabs)
+data("heights")
+heights %>% 
+	mutate(height = round(height)) %>%
+	group_by(height) %>%
+	summarize(p = mean(sex == "Male")) %>%
+	qplot(height, p, data =.)
+```
+
+In the plot we just made in Q1 we see high variability for low values of height. This is because we have few data points. This time use the quantile (\ 0.1,0.2,\dots,0.9 \)and the cut function to assure each group has the same number of points. Note that for any numeric vector x, you can create groups based on quantiles like this: cut(x, quantile(x, seq(0, 1, 0.1)), include.lowest = TRUE). 
+```{r}
+ps <- seq(0, 1, 0.1)
+heights %>% mutate(g = cut(height, quantile(height, ps), include.lowest = TRUE))
+  
+```
+
+You can generate data from a bivariate normal distrubution using the MASS package using the following code. 
+
+```{r}
+Sigma <- 9*matrix(c(1,0.5,0.5,1), 2, 2)
+dat <- MASS::mvrnorm(n = 10000, c(69, 69), Sigma) %>%
+	data.frame() %>% setNames(c("x", "y"))
+plot(dat)
+print("Using an approach similar to that used in the previous exercise, let's estimate the conditional expectations and make a plot. Part of the code has been provided for you: ")
+ps <- seq(0, 1, 0.1)
+dat %>% 
+	mutate(g = cut(x, quantile(x, ps), include.lowest = TRUE)) %>%
+  group_by(g) %>%
+  summarize(y = mean(y), x = mean(x)) %>%
+	qplot(x, y, data =.)
+```
+
+#Linear regression
+
+```{r}
+galton_heights <- GaltonFamilies %>% filter(childNum == 1 & gender == "male") %>% select (father, childHeight) %>% rename(son = childHeight)
+y <- galton_heights$son
+test_index <- createDataPartition(y, times = 1, p=0.5, list = FALSE)
+train_set <- galton_heights %>% slice(-test_index)
+test_set <- galton_heights %>% slice(test_index)
+#Guessing
+avg_height <- mean(train_set$son)
+#Squared loss is: 
+mean((avg_height - train_set$son)^2)
+print("Getting intercept and slope:")
+fit <-lm(son ~ father, data=train_set)
+fit$coef
+```
+
+From the regression course:
+$$f(x) = Pr(Y|X=x) = \beta_{0} + x*\beta_{1} => \widehat{f}(x) = 38 + 0.47x$$
+Let's see how the sqared error results, instead of guessing:
+```{r}
+y_hat <- fit$coef[1] + fit$coef[2]*test_set$father
+mean((y_hat - test_set$son)^2)
+```
+
+#The predict function
+Replaces the formula for the regression line. 
+```{r}
+y_hat <- predict(fit, test_set)
+```
+
+#Excercises
+Create a data set using the following code:
+```{r}
+set.seed(1)
+n <- 100
+Sigma <- 9*matrix(c(1.0, 0.5, 0.5, 1.0), 2, 2)
+dat <- MASS::mvrnorm(n = 100, c(69, 69), Sigma) %>%
+	data.frame() %>% setNames(c("x", "y"))
+```
+
+Use the caret package to partition the dataset into test and training sets of equal size. Train a linear model and calculate the RMSE. Repeat this exercise 100 times and report the mean and standard deviation of the RMSEs. (Hint: You can use the code shown in a previous course inside a call to replicate using a seed of 1.
+```{r}
+
+set.seed(1)
+rmses <- replicate(100,  { 
+  test_index <- createDataPartition(dat$y, times = 1, p=0.5, list = FALSE)
+  train_set <- dat %>% slice(-test_index)
+  test_set <- dat %>% slice(test_index)
+  fit <-lm(y ~ x, data=train_set)
+  y_hat <- predict(fit, test_set)
+  rmse <- sqrt(mean((y_hat - test_set$y)^2)) 
+  rmse
+}) 
+mean(rmse)
+sd(rmse)
+```
