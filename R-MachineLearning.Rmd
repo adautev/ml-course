@@ -579,7 +579,25 @@ day_margin_fit <-lm(margin ~ day, data=polls_2008)
 polls_2008_scatter_data <- polls_2008 %>% mutate(resid=resid(day_margin_fit), color=ifelse(resid(day_margin_fit) >0,"+","-"), fitted=fitted(day_margin_fit))
 ggplot(aes(day, margin, color=color), data=polls_2008_scatter_data) + geom_point() + geom_abline(intercept = day_margin_fit$coefficients[1], slope=day_margin_fit$coefficients[2])
     
-#span <- 7 fit <- with(polls_2008, ksmooth(day, margin, x.points = day, kernel="normal", bandwidth = span))
-
-#polls_2008 %>% mutate(smooth = fit$y) %>% ggplot(aes(day, margin)) + geom_point(size = 3, alpha = .5, color = "grey") + geom_line(aes(day, smooth), color="red")
+#
 ```
+##Bin smoothing
+In order to evaluate smoothing method, assumptions are needed about the data. In the current case, we determine that data grows slowly in the week, so we get wednesday and evaluate the margin for the week.
+We consider $f(x)=\mu$ if $|x_i-x_0| \leq 3.5$. When $x_0$ is a growth baseline (let's say middle of the week).
+In sych case $E[Y_i|X_i=x_i] \approx \mu$ if $|x_i-x_0| \leq 3.5$
+3.5 is called window size/bandwith/span.
+
+If we define $A_0$ as a set of indexes i, such that $|x_i-x_0| \leq 3.5$,and $N_0$ as the number of indexes in $A_0$, then the estimate is given by:
+
+$\widehat{f}(x_0) = 1/N_0_\sum{_{i \in A_0} Y_i$ - the average in the window
+ 
+The results are:
+```{r}
+span <- 7 
+fit <- with(polls_2008, ksmooth(day, margin, x.points = day, kernel="normal", bandwidth = span))
+polls_2008 %>% mutate(smooth = fit$y) %>% ggplot(aes(day, margin)) + geom_point(size = 3, alpha = .5, color = "grey") + geom_line(aes(day, smooth), color="red")
+```
+##Local Weighted regression(loess)
+Instead of assuming that a function is approximately constant in a window, we decide function is locally linear (Taylor's theorem). This way larger windows can be considered. Let's start with 3 week window.
+Here's the model.
+$E[Y_i|X_i=x_i] = \beta_0 + \beta_1(x_i-x_0)$ if $|x_i-x_0| \leq 10.5$```
