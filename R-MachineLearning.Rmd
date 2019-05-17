@@ -962,3 +962,244 @@ train_rpart <-  train(margin ~ ., method="rpart", tuneGrid = data.frame(cp = seq
 ggplot(train_rpart)
 ```
 Expected conditional probability $$f(x) = \mbox{E}(Y | X = x)$$
+
+###Excercise
+```{r}
+#Create a simple dataset where the outcome grows 0.75 units on average for every increase in a predictor, using this code:
+
+library(rpart)
+n <- 1000
+sigma <- 0.25
+set.seed(1)
+x <- rnorm(n, 0, 1)
+y <- 0.75 * x + rnorm(n, 0, sigma)
+dat <- data.frame(x = x, y = y)
+#use rpart to fit a regression tree and saves the result to fit
+fit <- rpart(y ~ ., data = dat) 
+plot(fit, margin=1)
+text(fit, cex=0.5)
+#make a scatter plot of y versus x along with the predicted values based on the fit.
+dat %>% 
+	mutate(y_hat = predict(fit)) %>% 
+	ggplot() +
+	geom_point(aes(x, y)) +
+  geom_step(aes(x, y_hat), col=2)
+```
+
+#Decision trees
+When outcome is categorical.
+```{r}
+#Let's play with the 2_7 dataset:
+train_rpart <- train(y~., method="rpart", tuneGrid=data.frame(cp=seq(0.0,0.1, len=25)), data = mnist_27$train)
+plot(train_rpart)
+confusionMatrix(predict(train_rpart, mnist_27$test), mnist_27$test$y)$overall["Accuracy"]
+#Let's plot 
+
+plot_cond_prob <- function(p_hat=NULL){
+     tmp <- mnist_27$true_p
+     if(!is.null(p_hat)){
+          tmp <- mutate(tmp, p=p_hat)
+     }
+     tmp %>% ggplot(aes(x_1, x_2, z=p, fill=p)) +
+          geom_raster(show.legend = FALSE) +
+          scale_fill_gradientn(colors=c("#F8766D","white","#00BFC4")) +
+          stat_contour(breaks=c(0.5),color="black")
+}
+p1 <- plot_cond_prob(predict(train_rpart, newdata = mnist_27$true_p, type = "prob")[,2]) +
+     ggtitle("Decision Tree")tuneGrid = data.frame(predFixed = seq(0, 3, 1), minNode = seq(25, 100, 25))
+p1
+```
+#Random forests
+```{r}
+#"Trying with polls"
+library(randomForest)
+rf_fit <- randomForest(margin ~ ., data = polls_2008)
+plot(rf_fit)
+#2_7
+rf_fit <- randomForest(y ~ ., data = mnist_27$train)
+plot(rf_fit)
+
+#Since the result is not yet smooth enough, I use Rborist as a random forest method to generate a cross-validated fit
+rf_fit <- train (y ~ ., data = mnist_27$train, method="Rborist", tuneGrid = data.frame(predFixed = seq(0, 3, 1), minNode = seq(25, 100, 25)))
+``` 
+
+#Excercise
+```{r}
+library(randomForest)
+fit <- randomForest(y ~ x, data = dat)
+dat %>% 
+	mutate(y_hat = predict(fit)) %>% 
+	ggplot() +
+	geom_point(aes(x, y)) +
+	geom_step(aes(x, y_hat), col = 2)
+plot(fit)
+```
+#Caret package playground
+```{r}
+library(caret)
+
+dat %>% 
+	mutate(y_hat = predict(fit)) %>% 
+	ggplot() +
+	geom_point(aes(x, y)) +
+	geom_step(aes(x, y_hat), col = 2)
+rf_fit <- train (y ~ ., data = dat, method="Rborist", tuneGrid = data.frame(predFixed = 1, minNode = seq(25, 100, 25)))
+plot(rf_fit)
+dat %>% 
+	mutate(y_hat = predict(rf_fit)) %>% 
+	ggplot() +
+	geom_point(aes(x, y)) +
+  geom_step(aes(x, y_hat), col = 2)
+```
+##Excercise
+```{r}
+#Use the rpart function to fit a classification tree to the tissue_gene_expression dataset. Use the train function to estimate the accuracy. Try out cp values of seq(0, 0.1, 0.01). Plot the accuracies to report the results of the best model. Set the seed to 1991. Which value of cp gives the highest accuracy?
+library(caret)
+set.seed(1991)
+data("tissue_gene_expression")
+
+fit_rpart <- with(tissue_gene_expression, train(x,y, method="rpart", tuneGrid = data.frame(cp = seq(0, 0.1, 0.01)), control=rpart.control(minsplit = 0)))
+confusionMatrix(fit_rpart)
+plot(fit_rpart$finalModel, margin=1)
+text(fit_rpart$finalModel, cex=0.5)
+#We can see that with just seven genes, we are able to predict the tissue type. Now let's see if we can predict the tissue type with even fewer genes using a Random Forest. Use the train function and the rf method to train a Random Forest. Try out values of mtry ranging from seq(50, 200, 25) (you can also explore other values on your own). What mtry value maximizes accuracy? To permit small nodesize to grow as we did with the classification trees, use the following argument: nodesize = 1. 
+#Note: This exercise will take some time to run. If you want to test out your code first, try using smaller values with ntree. Set the seed to 1991 again.
+
+#What value of mtry maximizes accuracy?
+set.seed(1991)
+fit_rb<- with(tissue_gene_expression, train(x,y, method="rf", tuneGrid = data.frame(mtry = seq(50, 200, 25)), nodesize=1))
+
+#The rpart model we ran above produced a tree that used just seven predictors. Extracting the predictor names is not straightforward, but can be done. If the output of the call to train was fit_rpart, we can extract the names like this:
+tree_terms <- as.character(unique(fit_rpart$finalModel$frame$var[!(fit_rpart$finalModel$frame$var == "<leaf>")]))
+tree_terms
+```
+
+#MNIST case study
+```{r}
+library(dslabs)
+mnist<-read_mnist()
+#Let's sample a smaller set of data (computation wise)
+set.seed(123)
+index <- sample(nrow(mnist$train$images), 1000)
+x<-mnist$train$images[index,]
+y<-factor(mnist$train$labels[index])
+
+index <- sample(nrow(mnist$train$images), 1000)
+x_test<-mnist$train$images[index,]
+y_test<-factor(mnist$train$labels[index])
+
+library(matrixStats)
+standard_deviations<-colSds(x)
+qplot(standard_deviations, bins=256, color=I("black"))
+nzv <- nearZeroVar(x)
+image(matrix(1:784 %in% nzv, 28, 28))
+#caret requires column names
+colnames(x) <- 1:ncol(mnist$train$images) 
+colnames(x_test) <- 1:ncol(mnist$train$images) 
+col_index <- setdiff(1:ncol(x), nzv)
+#Knn optimize for Nr neighoburs
+control <- trainControl(method="cv", number= 9, p = .9)
+fit_knn <- train(x[,col_index], y, method="knn", tuneGrid=data.frame(k=c(3,5,7)), trControl=control)
+#Now we've found optimisation parameters:
+fit_knn <- knn3(x[,col_index], y, k=3)
+y_hat_knn <- predict(fit_knn, x_test[, col_index], type="class")
+cm <- confusionMatrix(y_hat_knn, factor(y_test))
+cm$overall["Accuracy"]
+cm$byClass
+```
+
+```{r}
+library(dslabs)
+#mnist<-read_mnist()
+#Let's sample a smaller set of data (computation wise)
+set.seed(123)
+index <- sample(nrow(mnist$train$images), 1000)
+x<-mnist$train$images[index,]
+y<-factor(mnist$train$labels[index])
+
+index <- sample(nrow(mnist$train$images), 1000)
+x_test<-mnist$train$images[index,]
+y_test<-factor(mnist$train$labels[index])
+#Time for random forest MNIST training
+#Reducing compute time via max number of trees, minimum nodes = 1, predFixed is to be tuned
+#caret requires column names
+colnames(x) <- 1:ncol(mnist$train$images) 
+colnames(x_test) <- 1:ncol(mnist$train$images) 
+library(matrixStats)
+nzv <- nearZeroVar(x)
+col_index <- setdiff(1:ncol(x), nzv)
+library(Rborist)
+control <- trainControl(method="cv", number = 5, p = 0.8)
+grid <- expand.grid(minNode = c(1) , predFixed = c(10, 15, 35))
+
+train_rf <-  train(x[, col_index],
+                   y,
+                   method = "Rborist",
+                   nTree = 50,
+                   trControl = control,
+                   tuneGrid = grid,
+                   nSamp = 5000)
+
+ggplot(train_rf)
+train_rf$bestTune
+
+fit_rf <- Rborist(x[, col_index], y, 
+                  nTree = 1000,
+                  minNode = train_rf$bestTune$minNode,
+                  predFixed = train_rf$bestTune$predFixed)
+y_hat_rf <- factor(levels(y)[predict(fit_rf, x_test[ ,col_index])$yPred])
+cm <- confusionMatrix(y_hat_rf, y_test)
+cm$overall["Accuracy"]
+```
+
+##Excercises 
+```{r}
+#Use the training set to build a model with several of the models available from the caret package. We will test out all of the following models in this exercise:
+
+models <- c("glm", "lda",  "naive_bayes",  "svmLinear", 
+                "gamboost",  "gamLoess", "qda", 
+                "knn", "kknn", "loclda", "gam",
+                "rf", "ranger",  "wsrf", "Rborist", 
+                "avNNet", "mlp", "monmlp",
+                "adaboost", "gbm",
+                "svmRadial", "svmRadialCost", "svmRadialSigma")
+#We have not explained many of these, but apply them anyway using train with all the default parameters. You will likely need to install some packages. Keep in mind that you will probably get some warnings. Also, it will probably take a while to train all of the models - be patient!
+
+#Run the following code to train the various models:
+
+library(caret)
+library(dslabs)
+set.seed(1)
+data("mnist_27")
+
+fits <- lapply(models, function(model){ 
+	print(model)
+	train(y ~ ., method = model, data = mnist_27$train)
+}) 
+    
+names(fits) <- models
+pred <- sapply(fits, function(object) 
+	predict(object, newdata = mnist_27$test))
+dim(pred)
+acc <- colMeans(pred == mnist_27$test$y)
+acc
+mean(acc)
+```
+```{r}
+library(caret)
+df <- data.frame(matrix(unlist(pred), nrow=23, byrow=T))
+colnames(df) <- seq(1:200)
+rownames(df) <- models
+col_index <- seq(1,ncol(df), 1)
+predict_vote_l <- map(col_index, function(j){
+  ifelse(test = sum(df[,j] == 7) > 12, yes = 7, no = 2)
+})
+predict_vote <- as.factor(unlist(predict_vote_l)) #  as factor
+
+caret::confusionMatrix(predict_vote,  mnist_27$test$y)
+
+###Ahahaha and after seeeing the answer
+votes <- rowMeans(pred == "7")
+y_hat <- ifelse(votes > 0.5, "7", "2")
+mean(y_hat == mnist_27$test$y)
+```
